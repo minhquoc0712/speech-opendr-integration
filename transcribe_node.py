@@ -50,8 +50,6 @@ class AudioProcessor:
             self.audio_model = VoskLearner()
             self.audio_model.load(name=self.model_name, model_path=self.model_path, language=self.language, download_dir=self.download_dir)
 
-        self.phrase_timeout = args.phrase_timeout
-        self.phrase_time = None
         self.last_sample = b''
 
         self.temp_file = args.temp_file
@@ -69,29 +67,17 @@ class AudioProcessor:
         self.n_sample = None
 
     def callback(self, data):
-        now = rospy.get_time()
         # Add data to queue
-        self.data_queue.put((now, data.data))
+        self.data_queue.put(data.data)
 
     def process_audio(self):
         while not rospy.is_shutdown():
-            now = rospy.get_time()
             # Check if there is any data in the queue
             if not self.data_queue.empty():
                 # Get the audio data from the queue
-
-                # rint(now, self.phrase_time, self.phrase_timeout)
-                phrase_complete = False
-                if self.phrase_time and now - self.phrase_time > self.phrase_timeout:
-                    self.last_sample = b''
-                    phrase_complete = True
-
-                # print(phrase_complete)
-                self.phrase_time = now
-
                 # Concatenate our current audio data with the latest audio data.
                 while not self.data_queue.empty():
-                    now, data = self.data_queue.get()
+                    data = self.data_queue.get()
                     self.last_sample += data
 
                 # Write wav data to the temporary file.
@@ -142,47 +128,23 @@ class AudioProcessor:
 
                 else:
                     audio_array = whisper.load_audio(self.temp_file)
-                    # print(audio_array.shape)
-                    result = self.audio_model.infer(audio_array, builtin_transcribe=True)
-                    if len(result['segments']) > 1:
-                        last_segment = result['segments'][-1]
+                    transcription_whisper = self.audio_model.infer(audio_array, builtin_transcribe=True)
+                    segments = transcription_whisper.segments
+                    if len(segments) > 1:
+                        last_segment = segments[-1]
                         start_timestamp = last_segment['start']
                         self.n_sample = int(self.framerate * start_timestamp)
 
-                        text = [result['segments'][i]['text'].strip() for i in range(len(result['segments']) - 1)]
+                        text = [segments[i]['text'].strip() for i in range(len(segments) - 1)]
                         text = " ".join(text)
                     else:   
-                        text = result['text'].strip()
+                        text = transcription_whisper.data.strip()
 
-                    # os.system('cls' if os.name=='nt' else 'clear')
+                    os.system('cls' if os.name=='nt' else 'clear')
                     if self.n_sample is not None:
                         print(last_segment['text'])
                     else:
-                        print(result['text'].strip())
-                    # text = result.data.strip()
-                    # no_speech_probs = result['no_speech_probs']
-                    # for segment in result['segments']:
-                    #     print(segment['text'])
-
-                    # if phrase_complete:
-                    #     self.transcription.append(text)
-                    # else:
-                    #     self.transcription[-1] = text
-
-                    # result_segments = [segment['text'] for segment in result['segments']]
-                    # if phrase_complete:
-                    #     self.transcription.append(result_segments)
-                    # else:
-                    #     self.transcription[-1] = result_segments
-
-                    # os.system('cls' if os.name=='nt' else 'clear')
-                    # for line in self.transcription:
-                    #     print(line)
-                    # for segments in self.transcription:
-                    #     for line in segments:
-                    #         print(line)
-                    #     print()
-
+                        print(text)
 
                 # Sleep to prevent busy looping
                 # sleep(0.25)
@@ -196,8 +158,7 @@ if __name__ == '__main__':
     parser.add_argument('--model-name', default='tiny', help='model to use for audio processing. Options: tiny, small, medium, large, en-us')
     parser.add_argument('--model-path', default=None, help='path to model')
     parser.add_argument('--download-dir', default=None, help='directory to download models to')
-    parser.add_argument('--language', default=None, help='language to use for audio processing')
-    parser.add_argument('--phrase-timeout', type=float, default=1.0, help='timeout for phrases')
+    parser.add_argument('--language', default="en", help='language to use for audio processing')
     parser.add_argument('--temp-file', default='./temp.wav', help='temporary file foraudio data')
     parser.add_argument('--input-topic', default='/audio/audio', help='name of the topic to subscribe')
     parser.add_argument('--output-topic', default='/audio/transcription', help='name of the topic to publish')
