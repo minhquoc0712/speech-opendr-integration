@@ -29,16 +29,30 @@ from opendr.engine.target import VoskTranscription
 
 
 class TranscriptionNode:
-    def __init__(self, args):
-        rospy.init_node("opendr_transcription_node")
+    def __init__(
+        self,
+        backbone: str,
+        model_name: str = None,
+        model_path: str = None,
+        language: str = None,
+        temp_file: str = None, # Will be removed
+        download_dir: str = None,
+        input_audio_topic: str = "/audio/audio",
+        output_transcription_topic: str = "/opendr/transcription",
+        node_topic: str = "opendr_transcription_node",
+        sample_width: int = 2,
+        framerate: int = 16000,
+    ):
+        rospy.init_node(node_topic)
 
         self.data_queue = Queue()
 
-        self.backbone = args.backbone
-        self.model_name = args.model_name
-        self.model_path = args.model_path
-        self.language = None if args.language.lower() == "none" else args.language
-        self.download_dir = args.download_dir
+        self.node_topic = node_topic
+        self.backbone = backbone
+        self.model_name = model_name
+        self.model_path = model_path
+        self.language = language
+        self.download_dir = download_dir
 
         # Initialize model
         if self.backbone == "whisper":
@@ -62,11 +76,11 @@ class TranscriptionNode:
         self.last_sample = b""
         self.cut_audio = False
 
-        self.temp_file = args.temp_file
+        self.temp_file = temp_file
 
-        self.subscriber = rospy.Subscriber(args.input_topic, AudioData, self.callback)
+        self.subscriber = rospy.Subscriber(input_audio_topic, AudioData, self.callback)
         self.publisher = rospy.Publisher(
-            args.output_topic, OpenDRTranscription, queue_size=10
+            output_transcription_topic, OpenDRTranscription, queue_size=10
         )
 
         self.bridge = ROSBridge()
@@ -75,8 +89,8 @@ class TranscriptionNode:
         self.processing_thread = Thread(target=self.process_audio)
         self.processing_thread.start()
 
-        self.sample_width = args.sample_width
-        self.framerate = args.framerate
+        self.sample_width = sample_width
+        self.framerate = framerate
 
         self.n_sample = None
 
@@ -95,9 +109,8 @@ class TranscriptionNode:
                     new_data += self.data_queue.get()
 
                 # print(self.cut_audio)
-                if self.backbone == "vosk" and self.cut_audio:
+                if self.backbone == "vosk":
                     self.last_sample = new_data
-                    self.cut_audio = False
                 else:
                     self.last_sample += new_data
 
@@ -115,7 +128,9 @@ class TranscriptionNode:
                                     numpy_data = numpy_data[(self.n_sample - 3200) :]
                                 else:
                                     numpy_data = numpy_data[(self.n_sample) :]
-                                self.last_sample = self.last_sample[(self.n_sample * 2) :]
+                                self.last_sample = self.last_sample[
+                                    (self.n_sample * 2) :
+                                ]
                                 self.n_sample = None
                                 print("--------------------------")
 
@@ -139,7 +154,6 @@ class TranscriptionNode:
 
                         if transcription.accept_waveform:
                             print(f"Text: {transcription.data}")
-                            self.cut_audio = True
 
                             ros_transcription = self.bridge.to_ros_transcription(
                                 transcription
@@ -191,9 +205,7 @@ class TranscriptionNode:
                             text=text, accept_waveform=False
                         )
 
-                    ros_transcription = self.bridge.to_ros_transcription(
-                        transcription
-                    )
+                    ros_transcription = self.bridge.to_ros_transcription(transcription)
                     self.publisher.publish(ros_transcription)
 
                     # os.system('cls' if os.name=='nt' else 'clear')
@@ -233,12 +245,19 @@ if __name__ == "__main__":
         "--temp-file", default="./temp.wav", help="temporary file foraudio data"
     )
     parser.add_argument(
-        "--input-topic", default="/audio/audio", help="name of the topic to subscribe"
+        "--input-audio-topic",
+        default="/audio/audio",
+        help="name of the topic to subscribe",
     )
     parser.add_argument(
-        "--output-topic",
+        "--output-transcription-topic",
         default="/audio/transcription",
         help="name of the topic to publish",
+    )
+    parser.add_argument(
+        "--node-topic",
+        default="opendr_transcription_node",
+        help="name of the transcription ros node",
     )
     parser.add_argument(
         "--sample-width", type=int, default=2, help="sample width for audio data"
@@ -249,7 +268,17 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        node = TranscriptionNode(args)
+        node = TranscriptionNode(backbone=args.backbone,
+            model_name=args.model_name,
+            download_dir=args.download_dir,
+            language=None if args.language.lower() == "none" else args.language,
+            temp_file=args.temp_file, # will be removed
+            input_audio_topic=args.input_audio_topic,
+            output_transcription_topic=args.output_transcription_topic,
+            node_topic=args.node_topic,
+            sample_width=args.sample_width,
+            framerate=args.framerate,
+        )
         node.spin()
     except rospy.ROSInterruptException:
         pass
